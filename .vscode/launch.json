@@ -15,8 +15,8 @@
             "args": [],
             "stopAtEntry": false,
             "externalConsole": true,
-            "cwd": ".",
-            "program": "build/Debug/outDebug",
+            "cwd": "c:/Users/vuong/OneDrive/Tài liệu/PlatformIO/Projects/phan_loai_mau/src",
+            "program": "c:/Users/vuong/OneDrive/Tài liệu/PlatformIO/Projects/phan_loai_mau/src/build/Debug/outDebug",
             "MIMode": "gdb",
             "miDebuggerPath": "C:/Users/vuong/.platformio/packages/toolchain-atmelavr/bin/avr-gdb.exe",
             "setupCommands": [
