@@ -1,164 +1,227 @@
 #include <Arduino.h>
+#include <Servo.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
-#include <Servo.h>
 
-// LCD I2C
-LiquidCrystal_I2C lcd(0x27, 16, 2);
-
-// TCS3200 color sensor
+// TCS3200
 #define S0 7
 #define S1 6
 #define S2 A1
 #define S3 A2
 #define sensorOut A0
 
-// Cảm biến quang tại vị trí servo1 (đỏ) và servo2 (xanh dương)
-#define IR_SENSOR_RED 2
-#define IR_SENSOR_BLUE 3
-
-// Motor L298N
-#define IN1 8
-#define IN2 9
-
 // Servo
-Servo servo1;  // gạt màu đỏ
-Servo servo2;  // gạt màu xanh dương
 #define SERVO1_PIN 4
 #define SERVO2_PIN 5
 
-// Đếm sản phẩm
+// Motor
+#define IN1 8
+#define IN2 9
+
+// IR sensors
+#define IR_RED 2
+#define IR_BLUE 3
+
+// LCD I2C
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+Servo servo1;
+Servo servo2;
+
 int countRed = 0;
 int countGreen = 0;
 int countBlue = 0;
 
-// Biến lưu màu vật thể sau khi phân loại
-String currentColor = "";
+// Hàng đợi màu (dùng mảng đơn giản)
+const int MAX_QUEUE = 10;
+String colorQueue[MAX_QUEUE];
+int queueStart = 0;
+int queueEnd = 0;
+
+String currentColor = "unknown";
+String lastColor = "unknown";
+
+// Hàm push vào hàng đợi
+void enqueueColor(String color) {
+  if ((queueEnd + 1) % MAX_QUEUE != queueStart) {
+    colorQueue[queueEnd] = color;
+    queueEnd = (queueEnd + 1) % MAX_QUEUE;
+  }
+}
+
+// Hàm lấy màu khỏi hàng đợi
+String dequeueColor() {
+  if (queueStart == queueEnd) return "empty";
+  String color = colorQueue[queueStart];
+  queueStart = (queueStart + 1) % MAX_QUEUE;
+  return color;
+}
+
+// Kiểm tra hàng đợi có trống không
+bool isQueueEmpty() {
+  return queueStart == queueEnd;
+}
 
 void setup() {
+  Serial.begin(9600);
   lcd.init();
   lcd.backlight();
-  lcd.setCursor(0, 0);
-  lcd.print("Khoi dong...");
-  delay(1000);
-  lcd.clear();
+
+  pinMode(IR_RED, INPUT);
+  pinMode(IR_BLUE, INPUT);
+
+  servo1.attach(SERVO1_PIN);
+  servo2.attach(SERVO2_PIN);
+  servo1.write(0);
+  servo2.write(0);
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  digitalWrite(IN1, HIGH);  // Motor quay
+  digitalWrite(IN2, LOW);
 
   pinMode(S0, OUTPUT);
   pinMode(S1, OUTPUT);
   pinMode(S2, OUTPUT);
   pinMode(S3, OUTPUT);
   pinMode(sensorOut, INPUT);
-
-  pinMode(IR_SENSOR_RED, INPUT);
-  pinMode(IR_SENSOR_BLUE, INPUT);
-
-  pinMode(IN1, OUTPUT);
-  pinMode(IN2, OUTPUT);
-
-  servo1.write(0);
-  servo2.write(0);
-  delay(500);  // Đảm bảo servo ổn định trước khi attach
-  servo1.attach(SERVO1_PIN);
-  servo2.attach(SERVO2_PIN);
-
   digitalWrite(S0, HIGH);
   digitalWrite(S1, LOW);
 
-  Serial.begin(9600);
-}
+  lcd.setCursor(0, 0);
+  lcd.print("Color: UNKNOWN");
+  lcd.setCursor(0, 1);
+  lcd.print("R:0 G:0 B:0");
 
-int readColor(char color) {
-  switch (color) {
-    case 'R': digitalWrite(S2, LOW); digitalWrite(S3, LOW); break;
-    case 'G': digitalWrite(S2, HIGH); digitalWrite(S3, HIGH); break;
-    case 'B': digitalWrite(S2, LOW); digitalWrite(S3, HIGH); break;
-  }
-  delay(100);
-  return pulseIn(sensorOut, LOW);
-}
-
-void runConveyor() {
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
-}
-
-void stopConveyor() {
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, LOW);
+  delay(2000);
 }
 
 void loop() {
-  delay(3000);  // Đợi 3 giây mỗi lần quét màu
-  int red = readColor('R');
-  int green = readColor('G');
-  int blue = readColor('B');
+  unsigned int red, green, blue;
+  readRGB(red, green, blue);
+  detectColorWithRatio(red, green, blue);
 
-  Serial.print("R:"); Serial.print(red);
-  Serial.print(" G:"); Serial.print(green);
-  Serial.print(" B:"); Serial.println(blue);
+  // Nếu phát hiện màu mới, lưu vào hàng đợi (KHÔNG đếm ở đây nữa)
+  if (currentColor != lastColor && currentColor != "unknown") {
+    enqueueColor(currentColor);
 
-  int minValue = min(red, min(green, blue));
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Color: ");
+    lcd.print(currentColor);
+
+    lcd.setCursor(0, 1);
+    lcd.print("R:");
+    lcd.print(countRed);
+    lcd.print(" G:");
+    lcd.print(countGreen);
+    lcd.print(" B:");
+    lcd.print(countBlue);
+
+    delay(300);
+  }
+
+  lastColor = currentColor;
+
+  // IR_RED phát hiện và màu đầu là red
+  if (digitalRead(IR_RED) == LOW && !isQueueEmpty()) {
+    String c = dequeueColor();
+    if (c == "red") {
+      servo1.write(75);
+      delay(1400);
+      servo1.write(0);
+      countRed++;
+      updateLCD();  // cập nhật LCD sau khi đẩy
+    } else {
+      // Nếu không phải red, vẫn cần đưa lại vào queue
+      enqueueColor(c);
+    }
+  }
+
+  // IR_BLUE phát hiện và màu đầu là blue
+  if (digitalRead(IR_BLUE) == LOW && !isQueueEmpty()) {
+    String c = dequeueColor();
+    if (c == "blue") {
+      servo2.write(75);
+      delay(1400);
+      servo2.write(0);
+      countBlue++;
+      updateLCD();  // cập nhật LCD sau khi đẩy
+    } else if (c == "green") {
+      countGreen++;  // green đi thẳng, vẫn tính
+      updateLCD();
+    } else {
+      enqueueColor(c);
+    }
+  }
+
+  // Nếu cả hai cảm biến IR không phát hiện gì, kiểm tra đầu hàng đợi là GREEN
+  if (digitalRead(IR_RED) == HIGH && digitalRead(IR_BLUE) == HIGH && !isQueueEmpty()) {
+    String c = dequeueColor();
+    if (c == "green") {
+      countGreen++;
+      updateLCD();
+    } else {
+      enqueueColor(c);  // nếu không phải green thì đưa lại vào queue
+    }
+  }
+
+  delay(100);
+}
+
+// Cập nhật lại thông tin LCD
+void updateLCD() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Color: ");
+  lcd.print(currentColor);
+
+  lcd.setCursor(0, 1);
+  lcd.print("R:");
+  lcd.print(countRed);
+  lcd.print(" G:");
+  lcd.print(countGreen);
+  lcd.print(" B:");
+  lcd.print(countBlue);
+}
+
+
+// Đọc RGB từ cảm biến màu
+void readRGB(unsigned int &red, unsigned int &green, unsigned int &blue) {
+  const int samples = 5;
+  unsigned long r = 0, g = 0, b = 0;
+  for (int i = 0; i < samples; i++) {
+    r += readColorFrequency(LOW, LOW);    // RED
+    g += readColorFrequency(HIGH, HIGH);  // GREEN
+    b += readColorFrequency(LOW, HIGH);   // BLUE
+  }
+  red = r / samples;
+  green = g / samples;
+  blue = b / samples;
+}
+
+unsigned int readColorFrequency(int s2_val, int s3_val) {
+  digitalWrite(S2, s2_val);
+  digitalWrite(S3, s3_val);
+  delay(2);
+  return pulseIn(sensorOut, LOW);
+}
+
+// Phát hiện màu theo tỉ lệ
+void detectColorWithRatio(unsigned int red, unsigned int green, unsigned int blue) {
+  unsigned int minValue = min(red, min(green, blue));
 
   if (minValue == red && red < green * 0.8 && red < blue * 0.8) {
     currentColor = "red";
-    Serial.println("Phat hien: DO");
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Phat hien: DO");
+    Serial.println("Detected: RED");
   } else if (minValue == green && green < red * 0.8 && green < blue * 0.8) {
     currentColor = "green";
-    Serial.println("Phat hien: XANH LA");
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Phat hien: XANH LA");
+    Serial.println("Detected: GREEN");
   } else if (minValue == blue && blue < red * 0.8 && blue < green * 0.8) {
     currentColor = "blue";
-    Serial.println("Phat hien: XANH DUONG");
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Phat hien: XANH DUONG");
+    Serial.println("Detected: BLUE");
   } else {
     currentColor = "unknown";
-    Serial.println("Khong xac dinh");
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Khong xac dinh");
+    Serial.println("Detected: UNKNOWN");
   }
-
-  runConveyor();
-
-  if (digitalRead(IR_SENSOR_RED) == LOW && currentColor == "red") {
-    stopConveyor();
-    servo1.write(90);
-    delay(500);
-    servo1.write(0);
-    countRed++;
-    currentColor = "";
-    delay(300);
-    runConveyor();
-  }
-
-  if (digitalRead(IR_SENSOR_BLUE) == LOW && currentColor == "blue") {
-    stopConveyor();
-    servo2.write(90);
-    delay(500);
-    servo2.write(0);
-    countBlue++;
-    currentColor = "";
-    delay(300);
-    runConveyor();
-  }
-
-  if (currentColor == "green" && digitalRead(IR_SENSOR_BLUE) == LOW) {
-    countGreen++;
-    currentColor = "";
-    delay(300);
-  }
-
-  lcd.setCursor(0, 1);
-  lcd.print("Do:"); lcd.print(countRed);
-  lcd.print(" X: "); lcd.print(countGreen);
-  lcd.print(" B:"); lcd.print(countBlue);
-
-  delay(100);
 }
