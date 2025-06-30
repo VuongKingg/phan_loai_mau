@@ -55,10 +55,11 @@ void setup() {
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
 
+  servo1.write(0);
+  servo2.write(0);
+  delay(500);  // Đảm bảo servo ổn định trước khi attach
   servo1.attach(SERVO1_PIN);
   servo2.attach(SERVO2_PIN);
-  servo1.write(90);
-  servo2.write(90);
 
   digitalWrite(S0, HIGH);
   digitalWrite(S1, LOW);
@@ -87,6 +88,7 @@ void stopConveyor() {
 }
 
 void loop() {
+  delay(3000);  // Đợi 3 giây mỗi lần quét màu
   int red = readColor('R');
   int green = readColor('G');
   int blue = readColor('B');
@@ -102,34 +104,34 @@ void loop() {
     Serial.println("Phat hien: DO");
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("Phat hien: RED");
+    lcd.print("Phat hien: DO");
   } else if (minValue == green && green < red * 0.8 && green < blue * 0.8) {
     currentColor = "green";
     Serial.println("Phat hien: XANH LA");
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("Phat hien: GREEN");
+    lcd.print("Phat hien: XANH LA");
   } else if (minValue == blue && blue < red * 0.8 && blue < green * 0.8) {
     currentColor = "blue";
     Serial.println("Phat hien: XANH DUONG");
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("Phat hien: BLUE");
+    lcd.print("Phat hien: XANH DUONG");
   } else {
     currentColor = "unknown";
     Serial.println("Khong xac dinh");
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("Unknown Color");
+    lcd.print("Khong xac dinh");
   }
 
   runConveyor();
 
   if (digitalRead(IR_SENSOR_RED) == LOW && currentColor == "red") {
     stopConveyor();
-    servo1.write(0);
-    delay(500);
     servo1.write(90);
+    delay(500);
+    servo1.write(0);
     countRed++;
     currentColor = "";
     delay(300);
@@ -138,9 +140,9 @@ void loop() {
 
   if (digitalRead(IR_SENSOR_BLUE) == LOW && currentColor == "blue") {
     stopConveyor();
-    servo2.write(0);
-    delay(500);
     servo2.write(90);
+    delay(500);
+    servo2.write(0);
     countBlue++;
     currentColor = "";
     delay(300);
@@ -154,8 +156,8 @@ void loop() {
   }
 
   lcd.setCursor(0, 1);
-  lcd.print("R:"); lcd.print(countRed);
-  lcd.print(" G: "); lcd.print(countGreen);
+  lcd.print("Do:"); lcd.print(countRed);
+  lcd.print(" X: "); lcd.print(countGreen);
   lcd.print(" B:"); lcd.print(countBlue);
 
   delay(100);
